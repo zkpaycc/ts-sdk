@@ -3,15 +3,36 @@ on:
   push:
     tags:
       - 'v*'
+
+# Add permissions to grant write access
+permissions:
+  contents: write  # Allows pushing commits and tags
+
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v4
         with:
-          node-version: '14'
+          fetch-depth: 0  # Fetch all history to ensure tags and branches are available
+      
+      - name: Set up Git branch and identity
+        run: |
+          git checkout main  # Replace 'main' with your default branch if different
+          git config user.name "zk"
+          git config user.email "team@zkpay.cc"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      
       - run: npm ci
+      
+      - name: Configure npm authentication
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > .npmrc
+      
       - run: npx release-it
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

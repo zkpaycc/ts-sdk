@@ -1,6 +1,12 @@
 {
   "github": {
-    "release": true
+    "release": true,
+    "releaseNotes": "echo Release {{version}}"
+  },
+  "git": {
+    "commit": true,
+    "tag": true,
+    "push": true
   },
   "npm": {
     "publish": true
