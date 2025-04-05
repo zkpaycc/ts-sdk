@@ -1,4 +1,5 @@
 import { getAddress } from "viem";
+import qs from "qs";
 import { ApiClient, RequestOptions } from "./apiClient";
 import { extractRequestTokenMetadata } from "./utils";
 import {
@@ -7,12 +8,17 @@ import {
   PaymentResponse,
   PaymentDetails,
   GetChannelQuery,
+  AuthResponse,
+  Auth,
 } from "./types";
 import { ValidationError } from "./errors";
+import { SiweMessage } from "siwe";
 
 export class Merchant {
   private readonly apiClient: ApiClient;
   private readonly config: MerchantConfigs;
+  private refreshingToken: boolean = false;
+  auth?: Auth;
 
   constructor(config: MerchantConfigs) {
     if (!config.merchantAddress) {
@@ -34,22 +40,29 @@ export class Merchant {
   async createPayment(params: PaymentParams): Promise<PaymentResponse> {
     this.validatePaymentParams(params);
 
-    const { payload, signature } = await this.prepareRequest(params);
+    await this.prepareSession();
 
-    console.log(
-      `[zkpay/sdk] Creating payment channel with payload:`,
-      payload,
-      signature
-    );
+    const token = await extractRequestTokenMetadata(params);
+    const payload = {
+      chainId: params.chain.id,
+      targetAddress: this.config.merchantAddress,
+      amount: (parseFloat(params.amount) * 10 ** token.decimals).toString(),
+      tokenAddress: token.address,
+      webhookUrl: this.config.webhookUrl,
+      redirectUrl: this.config.redirectUrl,
+      metadata: params.metadata,
+    };
+
+    console.log(`[zkpay/sdk] Creating payment channel with payload:`, payload);
 
     const options: RequestOptions = {};
-    if (signature) {
-      options.headers = { signature };
+    if (this.auth && this.auth.expiredAt > Date.now()) {
+      options.headers = { authorization: this.auth.token };
     }
 
     try {
       return await this.apiClient.post<PaymentResponse>(
-        "/v1/public/channels",
+        "/v1/channels",
         payload,
         options
       );
@@ -64,16 +77,17 @@ export class Merchant {
       throw new ValidationError("Signer is required to perform this action");
     }
 
-    const base64Query = Buffer.from(
-      JSON.stringify({ query, expiredAt: Date.now() + 20_000 })
-    ).toString("base64");
-    const signature = await this.config.signer.signMessage(base64Query);
+    await this.prepareSession();
 
     try {
+      const queryString = qs.stringify(query, {
+        arrayFormat: "indices",
+        encode: false,
+      });
       return await this.apiClient.get<PaymentDetails[]>(
-        `/v1/public/channels?query=${base64Query}`,
+        `/v1/channels?${queryString}`,
         {
-          headers: { signature },
+          headers: { authorization: this.auth!.token },
         }
       );
     } catch (error) {
@@ -91,38 +105,65 @@ export class Merchant {
     }
 
     try {
-      return await this.apiClient.get<PaymentDetails>(
-        `/v1/public/channels/${id}`
-      );
+      return await this.apiClient.get<PaymentDetails>(`/v1/channels/${id}`);
     } catch (error) {
       console.error(`[zkpay/sdk] Failed to fetch payment ${id}:`, error);
       throw error;
     }
   }
 
-  private async prepareRequest(params: PaymentParams): Promise<{
-    payload: object;
-    signature?: string;
-  }> {
-    const token = await extractRequestTokenMetadata(params);
-    const payload = {
-      chainId: params.chain.id,
-      targetAddress: this.config.merchantAddress,
-      amount: (parseFloat(params.amount) * 10 ** token.decimals).toString(),
-      tokenAddress: token.address,
-      webhookUrl: this.config.webhookUrl,
-      redirectUrl: this.config.redirectUrl,
-      metadata: params.metadata,
-    };
+  private async prepareSession(): Promise<void> {
+    if (!this.config.signer) {
+      return;
+    }
 
-    if (!this.config.signer) return { payload };
+    if (this.auth && this.auth.expiredAt > Date.now()) {
+      return;
+    }
 
-    const rawPayload = { payload, expiredAt: Date.now() + 20_000 };
-    const base64Payload = Buffer.from(JSON.stringify(rawPayload)).toString(
-      "base64"
-    );
-    const signature = await this.config.signer.signMessage(base64Payload);
-    return { payload: { payload: base64Payload }, signature };
+    // Prevent concurrent refresh attempts
+    if (this.refreshingToken) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return this.prepareSession(); // Retry after short delay
+    }
+
+    this.refreshingToken = true;
+    try {
+      const signer = this.config.signer;
+      let domain = "https://zkpay.cc";
+      if (typeof window !== "undefined") {
+        domain = window.location.origin;
+      }
+
+      const address = await signer.getAddress();
+
+      const message = new SiweMessage({
+        version: "1",
+        chainId: 1,
+        domain: domain.replace(/^https?:\/\//, ""),
+        uri: domain,
+        address,
+        nonce: Math.random().toString(36).substring(2, 15),
+        issuedAt: new Date().toISOString(),
+      });
+
+      const signature = await signer.signMessage(message.prepareMessage());
+      const { token, expiresIn } = await this.apiClient.post<AuthResponse>(
+        "/v1/auth",
+        { message: message.prepareMessage(), signature }
+      );
+
+      const bufferSeconds = 10;
+      this.auth = {
+        token,
+        expiredAt: Date.now() + (expiresIn - bufferSeconds) * 1000,
+      };
+    } catch (error) {
+      this.refreshingToken = false; // Explicitly reset before throwing
+      console.error(`[zkpay/sdk] Failed to init session:`, error);
+      throw new Error("Authentication failed");
+    }
+    this.refreshingToken = false; // Normal completion path
   }
 
   private validatePaymentParams(params: PaymentParams) {
