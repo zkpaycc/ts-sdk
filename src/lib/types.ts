@@ -18,6 +18,11 @@ export interface PaymentParams {
   metadata?: Record<string, unknown>;
 }
 
+export interface Auth {
+  token: string;
+  expiredAt: number;
+}
+
 export interface GetChannelQuery {
   targetAddress?: Address;
   page?: number;
@@ -27,6 +32,11 @@ export interface GetChannelQuery {
 export interface PaymentResponse {
   id: string;
   url: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  expiresIn: number;
 }
 
 export interface PaymentDetails {
