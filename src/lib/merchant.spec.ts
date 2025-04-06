@@ -10,6 +10,7 @@ import { sepolia } from "viem/chains";
 jest.mock("./apiClient");
 jest.mock("./utils", () => ({
   extractRequestTokenMetadata: jest.fn(),
+  extractChannelTokenMetadata: jest.fn(),
 }));
 
 describe("Merchant", () => {
@@ -34,10 +35,20 @@ describe("Merchant", () => {
   };
   const mockPaymentDetails = {
     id: "pay_123",
+    chainId: sepolia.id,
     status: "completed",
     amount: "1000000",
   };
-  const mockPaymentDetailsList = [mockPaymentDetails];
+  const mockQueryPaymentsResponse = {
+    items: [mockPaymentDetails],
+    meta: {
+      totalItems: 1,
+      itemCount: 1,
+      itemsPerPage: 20,
+      totalPages: 1,
+      currentPage: 1,
+    },
+  };
   let mockSigner: MockProxy<Signer>;
 
   beforeEach(() => {
@@ -58,6 +69,15 @@ describe("Merchant", () => {
             decimals: 6,
             address: "0xdefault" as `0x${string}`,
           };
+        }
+
+        return { decimals: 18 };
+      }
+    );
+    require("./utils").extractChannelTokenMetadata.mockImplementation(
+      (channel: { chainId: number; tokenAddress?: Address }) => {
+        if (channel.tokenAddress) {
+          return { decimals: 6, address: channel.tokenAddress };
         }
 
         return { decimals: 18 };
@@ -275,6 +295,7 @@ describe("Merchant", () => {
       it("should return payment details on success", async () => {
         const result = await merchant.getPayment("pay_123");
         expect(result).toEqual(mockPaymentDetails);
+        expect(result.humanReadableAmount).toEqual("0.000000000001");
       });
     });
 
@@ -308,7 +329,7 @@ describe("Merchant", () => {
         signer: mockSigner,
       });
       mockApiClient = (merchant as any).apiClient as jest.Mocked<ApiClient>;
-      mockApiClient.get.mockResolvedValue(mockPaymentDetailsList);
+      mockApiClient.get.mockResolvedValue(mockQueryPaymentsResponse);
       mockApiClient.post.mockImplementation(async (path) => {
         if (path === "/v1/auth") return mockAuthResponse;
         return mockSuccessResponse;
@@ -378,7 +399,8 @@ describe("Merchant", () => {
 
     it("should return payment details list on success", async () => {
       const result = await merchant.queryPayments(query);
-      expect(result).toEqual(mockPaymentDetailsList);
+      expect(result).toEqual(mockQueryPaymentsResponse);
+      expect(result.items[0].humanReadableAmount).toEqual("0.000000000001");
     });
   });
 });
