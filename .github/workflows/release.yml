@@ -1,8 +1,7 @@
 name: Release
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
 
 # Add permissions to grant write access
 permissions:
