@@ -1,7 +1,10 @@
-import { getAddress } from "viem";
+import { formatUnits, getAddress } from "viem";
 import qs from "qs";
 import { ApiClient, RequestOptions } from "./apiClient";
-import { extractRequestTokenMetadata } from "./utils";
+import {
+  extractChannelTokenMetadata,
+  extractRequestTokenMetadata,
+} from "./utils";
 import {
   MerchantConfigs,
   PaymentParams,
@@ -10,9 +13,9 @@ import {
   GetChannelQuery,
   AuthResponse,
   Auth,
+  PaymentsResponse,
 } from "./types";
 import { ValidationError } from "./errors";
-import { SiweMessage } from "siwe";
 
 export class Merchant {
   private readonly apiClient: ApiClient;
@@ -72,7 +75,7 @@ export class Merchant {
     }
   }
 
-  async queryPayments(query: GetChannelQuery = {}): Promise<PaymentDetails[]> {
+  async queryPayments(query: GetChannelQuery = {}): Promise<PaymentsResponse> {
     if (!this.config.signer) {
       throw new ValidationError("Signer is required to perform this action");
     }
@@ -84,12 +87,19 @@ export class Merchant {
         arrayFormat: "indices",
         encode: false,
       });
-      return await this.apiClient.get<PaymentDetails[]>(
+      const result = await this.apiClient.get<PaymentsResponse>(
         `/v1/channels?${queryString}`,
         {
           headers: { authorization: this.auth!.token },
         }
       );
+
+      // TODO: could be expensive.
+      for (const item of result.items) {
+        this.normalize(item);
+      }
+
+      return result;
     } catch (error) {
       console.error(
         `[zkpay/sdk] Failed to query ${JSON.stringify(query)}:`,
@@ -105,7 +115,10 @@ export class Merchant {
     }
 
     try {
-      return await this.apiClient.get<PaymentDetails>(`/v1/channels/${id}`);
+      const result = await this.apiClient.get<PaymentDetails>(
+        `/v1/channels/${id}`
+      );
+      return await this.normalize(result);
     } catch (error) {
       console.error(`[zkpay/sdk] Failed to fetch payment ${id}:`, error);
       throw error;
@@ -130,27 +143,13 @@ export class Merchant {
     this.refreshingToken = true;
     try {
       const signer = this.config.signer;
-      let domain = "https://zkpay.cc";
-      if (typeof window !== "undefined") {
-        domain = window.location.origin;
-      }
-
       const address = await signer.getAddress();
 
-      const message = new SiweMessage({
-        version: "1",
-        chainId: 1,
-        domain: domain.replace(/^https?:\/\//, ""),
-        uri: domain,
-        address,
-        nonce: Math.random().toString(36).substring(2, 15),
-        issuedAt: new Date().toISOString(),
-      });
-
-      const signature = await signer.signMessage(message.prepareMessage());
+      const message = this.prepareSiweMessage(address);
+      const signature = await signer.signMessage(message);
       const { token, expiresIn } = await this.apiClient.post<AuthResponse>(
         "/v1/auth",
-        { message: message.prepareMessage(), signature }
+        { message, signature }
       );
 
       const bufferSeconds = 10;
@@ -164,6 +163,18 @@ export class Merchant {
       throw new Error("Authentication failed");
     }
     this.refreshingToken = false; // Normal completion path
+  }
+
+  private prepareSiweMessage(address: string): string {
+    let uri = "https://zkpay.cc";
+    if (typeof window !== "undefined") {
+      uri = window.location.origin;
+    }
+    const domain = uri.replace(/^https?:\/\//, "");
+    const nonce = Math.random().toString(36).substring(2, 15);
+    const issuedAt = new Date().toISOString();
+
+    return `${domain} wants you to sign in with your Ethereum account:\n${address}\n\n\nURI: ${uri}\nVersion: 1\nChain ID: 1\nNonce: ${nonce}\nIssued At: ${issuedAt}`;
   }
 
   private validatePaymentParams(params: PaymentParams) {
@@ -181,5 +192,17 @@ export class Merchant {
     if (rawAmount <= 0) {
       throw new ValidationError("Amount must be greater than 0");
     }
+  }
+
+  private async normalize(payment: PaymentDetails): Promise<PaymentDetails> {
+    const token = await extractChannelTokenMetadata(payment);
+    if (!token) return payment;
+
+    payment.humanReadableAmount = formatUnits(
+      BigInt(payment.amount),
+      token.decimals
+    );
+
+    return payment;
   }
 }

@@ -43,11 +43,24 @@ export interface PaymentDetails {
   id: string;
   chainId: number;
   targetAddress: Address;
+  tokenAddress?: Address;
   amount: string;
+  humanReadableAmount: string;
   status: string;
   redirectUrl: string;
   transactions: Transaction[];
   [key: string]: unknown;
+}
+
+export interface PaymentsResponse {
+  items: PaymentDetails[];
+  meta: {
+    totalItems: number;
+    itemCount: number;
+    itemsPerPage: number;
+    totalPages: number;
+    currentPage: number;
+  };
 }
 
 export interface ApiErrorResponse {
