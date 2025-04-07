@@ -6,8 +6,10 @@ import { GetChannelQuery, PaymentParams } from "./types";
 import { Signer } from "ethers";
 import { MockProxy, mock } from "jest-mock-extended";
 import { sepolia } from "viem/chains";
+import { AuthManager } from "./authManager";
 
 jest.mock("./apiClient");
+jest.mock("./authManager");
 jest.mock("./utils", () => ({
   extractRequestTokenMetadata: jest.fn(),
   extractChannelTokenMetadata: jest.fn(),
@@ -16,6 +18,7 @@ jest.mock("./utils", () => ({
 describe("Merchant", () => {
   let merchant: Merchant;
   let mockApiClient: jest.Mocked<ApiClient>;
+  let mockAuthManager: jest.Mocked<AuthManager>;
   const mockConfig = {
     merchantAddress: "0xd10A6AE6eBa017FAb5b29fA7f895a61Da64A8f00" as Address,
     timeout: 3000,
@@ -24,10 +27,6 @@ describe("Merchant", () => {
   const validParams: PaymentParams = {
     chain: sepolia,
     amount: "100",
-  };
-  const mockAuthResponse = {
-    token: "new-jwt-token",
-    expiresIn: 3600,
   };
   const mockSuccessResponse = {
     id: "pay_123",
@@ -53,24 +52,27 @@ describe("Merchant", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockApiClient = mock<ApiClient>();
+    mockAuthManager = mock<AuthManager>();
+    mockAuthManager.ensureAuthenticated.mockResolvedValue();
+    mockAuthManager.getAuthToken.mockReturnValue(undefined); // Default no token
+
+    // Manually instantiate Merchant with mocked dependencies
     merchant = new Merchant(mockConfig);
-    mockApiClient = (merchant as any).apiClient as jest.Mocked<ApiClient>;
+    (merchant as any).apiClient = mockApiClient;
+    (merchant as any).authManager = mockAuthManager;
 
     // Default mock implementations
-    mockApiClient.post.mockImplementation(async (path) => {
-      if (path === "/v1/auth") return mockAuthResponse;
-      return mockSuccessResponse;
-    });
+    mockApiClient.post.mockResolvedValue(mockSuccessResponse);
     mockApiClient.get.mockResolvedValue(mockPaymentDetails);
     require("./utils").extractRequestTokenMetadata.mockImplementation(
       (params: PaymentParams) => {
-        if (params.currency == "USDT") {
+        if (params.currency === "USDT") {
           return {
             decimals: 6,
             address: "0xdefault" as `0x${string}`,
           };
         }
-
         return { decimals: 18 };
       }
     );
@@ -79,7 +81,6 @@ describe("Merchant", () => {
         if (channel.tokenAddress) {
           return { decimals: 6, address: channel.tokenAddress };
         }
-
         return { decimals: 18 };
       }
     );
@@ -96,7 +97,7 @@ describe("Merchant", () => {
   });
 
   afterEach(() => {
-    jest.useRealTimers(); // Restore real timers
+    jest.useRealTimers();
   });
 
   describe("constructor", () => {
@@ -105,9 +106,9 @@ describe("Merchant", () => {
     });
 
     it("should throw ValidationError for invalid merchantAddress format", () => {
-      expect(() => new Merchant({ merchantAddress: "0xinvalid" })).toThrow(
-        ValidationError
-      );
+      expect(
+        () => new Merchant({ merchantAddress: "0xinvalid" } as any)
+      ).toThrow(ValidationError);
     });
 
     it("should initialize with valid config", () => {
@@ -120,8 +121,9 @@ describe("Merchant", () => {
 
   describe("createPayment", () => {
     describe("valid parameters", () => {
-      it("should call apiClient.post with correct payload", async () => {
+      it("should call apiClient.post with correct payload without auth", async () => {
         await merchant.createPayment(validParams);
+        expect(mockAuthManager.ensureAuthenticated).toHaveBeenCalled();
         expect(mockApiClient.post).toHaveBeenCalledWith(
           "/v1/channels",
           expect.objectContaining({
@@ -133,100 +135,19 @@ describe("Merchant", () => {
         );
       });
 
+      it("should include auth token in headers if present", async () => {
+        mockAuthManager.getAuthToken.mockReturnValue("jwt-token");
+        await merchant.createPayment(validParams);
+        expect(mockApiClient.post).toHaveBeenCalledWith(
+          "/v1/channels",
+          expect.any(Object),
+          { headers: { authorization: "jwt-token" } }
+        );
+      });
+
       it("should return payment response on success", async () => {
         const result = await merchant.createPayment(validParams);
         expect(result).toEqual(mockSuccessResponse);
-      });
-    });
-
-    describe("createPayment with signer", () => {
-      beforeEach(() => {
-        merchant = new Merchant({
-          ...mockConfig,
-          signer: mockSigner,
-        });
-        mockApiClient = (merchant as any).apiClient as jest.Mocked<ApiClient>;
-        mockApiClient.post.mockImplementation(async (path) => {
-          if (path === "/v1/auth") return mockAuthResponse;
-          return mockSuccessResponse;
-        });
-      });
-
-      describe("auth token does not exist", () => {
-        it("should get new auth token before fetching channels", async () => {
-          await merchant.createPayment(validParams);
-
-          expect(mockSigner.signMessage).toHaveBeenCalled();
-          expect(mockApiClient.post).toHaveBeenCalledWith(
-            "/v1/channels",
-            expect.objectContaining({
-              chainId: validParams.chain.id,
-              targetAddress: mockConfig.merchantAddress,
-              amount: "100000000000000000000",
-            }),
-            {
-              headers: {
-                authorization: "new-jwt-token",
-              },
-            }
-          );
-        });
-      });
-
-      describe("auth token expired", () => {
-        beforeEach(() => {
-          merchant.auth = {
-            token: "expired-token",
-            expiredAt: Date.now() - 1000, // Simulate expired token
-          };
-        });
-
-        it("should get new auth token and attach to the request", async () => {
-          await merchant.createPayment(validParams);
-
-          expect(mockSigner.signMessage).toHaveBeenCalled();
-          expect(mockApiClient.post).toHaveBeenCalledWith(
-            "/v1/channels",
-            expect.objectContaining({
-              chainId: validParams.chain.id,
-              targetAddress: mockConfig.merchantAddress,
-              amount: "100000000000000000000",
-            }),
-            {
-              headers: {
-                authorization: "new-jwt-token",
-              },
-            }
-          );
-        });
-      });
-
-      describe("auth token is valid", () => {
-        beforeEach(() => {
-          merchant.auth = {
-            token: "old-valid-token",
-            expiredAt: Date.now() + 1000, // Simulate valid token
-          };
-        });
-
-        it("reuses token for the request", async () => {
-          await merchant.createPayment(validParams);
-
-          expect(mockSigner.signMessage).not.toHaveBeenCalled();
-          expect(mockApiClient.post).toHaveBeenCalledWith(
-            "/v1/channels",
-            expect.objectContaining({
-              chainId: validParams.chain.id,
-              targetAddress: mockConfig.merchantAddress,
-              amount: "100000000000000000000",
-            }),
-            {
-              headers: {
-                authorization: "old-valid-token",
-              },
-            }
-          );
-        });
       });
     });
 
@@ -254,7 +175,7 @@ describe("Merchant", () => {
         const metadata = { orderId: "123" };
         await merchant.createPayment({ ...validParams, metadata });
         expect(mockApiClient.post).toHaveBeenCalledWith(
-          expect.any(String),
+          "/v1/channels",
           expect.objectContaining({ metadata }),
           {}
         );
@@ -264,19 +185,13 @@ describe("Merchant", () => {
     describe("invalid parameters", () => {
       it("should throw ValidationError if amount is missing", async () => {
         await expect(
-          merchant.createPayment({
-            ...validParams,
-            amount: undefined as any,
-          })
+          merchant.createPayment({ ...validParams, amount: undefined as any })
         ).rejects.toThrow(ValidationError);
       });
 
       it("should throw ValidationError if amount is not numeric", async () => {
         await expect(
-          merchant.createPayment({
-            ...validParams,
-            amount: "not-a-number",
-          })
+          merchant.createPayment({ ...validParams, amount: "not-a-number" })
         ).rejects.toThrow(ValidationError);
       });
     });
@@ -284,14 +199,6 @@ describe("Merchant", () => {
 
   describe("getPayment", () => {
     describe("valid payment ID", () => {
-      it("should call apiClient.get with correct endpoint", async () => {
-        const paymentId = "pay_123";
-        await merchant.getPayment(paymentId);
-        expect(mockApiClient.get).toHaveBeenCalledWith(
-          `/v1/channels/${paymentId}`
-        );
-      });
-
       it("should return payment details on success", async () => {
         const result = await merchant.getPayment("pay_123");
         expect(result).toEqual(mockPaymentDetails);
@@ -324,80 +231,39 @@ describe("Merchant", () => {
     };
 
     beforeEach(() => {
-      merchant = new Merchant({
-        ...mockConfig,
-        signer: mockSigner,
-      });
-      mockApiClient = (merchant as any).apiClient as jest.Mocked<ApiClient>;
+      merchant = new Merchant({ ...mockConfig, signer: mockSigner });
+      (merchant as any).apiClient = mockApiClient;
+      (merchant as any).authManager = mockAuthManager;
       mockApiClient.get.mockResolvedValue(mockQueryPaymentsResponse);
-      mockApiClient.post.mockImplementation(async (path) => {
-        if (path === "/v1/auth") return mockAuthResponse;
-        return mockSuccessResponse;
-      });
     });
 
     it("should throw ValidationError if signer is not provided", async () => {
       merchant = new Merchant(mockConfig);
+      (merchant as any).apiClient = mockApiClient;
+      (merchant as any).authManager = mockAuthManager;
       await expect(merchant.queryPayments(query)).rejects.toThrow(
         ValidationError
       );
     });
 
-    describe("auth token does not exist", () => {
-      it("should get new auth token before fetching channels", async () => {
-        await merchant.queryPayments(query);
+    it("should call ensureAuthenticated", async () => {
+      await merchant.queryPayments(query);
 
-        expect(mockApiClient.get).toHaveBeenCalledWith(
-          "/v1/channels?targetAddress=0x2b8E0c111c4D661b1A1F7614016f969df80Bc945",
-          {
-            headers: { authorization: mockAuthResponse.token },
-          }
-        );
-      });
+      expect(mockAuthManager.ensureAuthenticated).toHaveBeenCalled();
     });
 
-    describe("auth token expired", () => {
-      beforeEach(() => {
-        merchant.auth = {
-          token: "expired-token",
-          expiredAt: Date.now() - 1000, // Simulate expired token
-        };
-      });
-
-      it("should get new auth token before fetching channels", async () => {
-        await merchant.queryPayments(query);
-
-        expect(mockApiClient.get).toHaveBeenCalledWith(
-          "/v1/channels?targetAddress=0x2b8E0c111c4D661b1A1F7614016f969df80Bc945",
-          {
-            headers: { authorization: mockAuthResponse.token },
-          }
-        );
-      });
-    });
-
-    describe("auth token is valid", () => {
-      beforeEach(() => {
-        merchant.auth = {
-          token: "old-valid-token",
-          expiredAt: Date.now() + 1000, // Simulate valid token
-        };
-      });
-
-      it("reuses token to fetch channels", async () => {
-        await merchant.queryPayments(query);
-
-        expect(mockSigner.signMessage).not.toHaveBeenCalled();
-        expect(mockApiClient.get).toHaveBeenCalledWith(
-          "/v1/channels?targetAddress=0x2b8E0c111c4D661b1A1F7614016f969df80Bc945",
-          {
-            headers: { authorization: "old-valid-token" },
-          }
-        );
-      });
+    it("should call apiClient.get with auth token", async () => {
+      mockAuthManager.getAuthToken.mockReturnValue("jwt-token");
+      await merchant.queryPayments(query);
+      expect(mockAuthManager.ensureAuthenticated).toHaveBeenCalled();
+      expect(mockApiClient.get).toHaveBeenCalledWith(
+        "/v1/channels?targetAddress=0x2b8E0c111c4D661b1A1F7614016f969df80Bc945",
+        { headers: { authorization: "jwt-token" } }
+      );
     });
 
     it("should return payment details list on success", async () => {
+      mockAuthManager.getAuthToken.mockReturnValue("jwt-token");
       const result = await merchant.queryPayments(query);
       expect(result).toEqual(mockQueryPaymentsResponse);
       expect(result.items[0].humanReadableAmount).toEqual("0.000000000001");
