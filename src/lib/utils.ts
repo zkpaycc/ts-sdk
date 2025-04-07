@@ -61,7 +61,9 @@ export const chainMap = new Map<number, Chain>(
 export const extractChannelTokenMetadata = async (channel: {
   chainId: number;
   tokenAddress?: Address;
-}): Promise<{ decimals: number; address?: string } | undefined> => {
+}): Promise<
+  { decimals: number; symbol: string; address?: string } | undefined
+> => {
   const chain = chainMap.get(channel.chainId);
   if (!chain) return undefined;
 

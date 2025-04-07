@@ -44,6 +44,7 @@ export interface PaymentDetails {
   chainId: number;
   targetAddress: Address;
   tokenAddress?: Address;
+  currency: string;
   amount: string;
   humanReadableAmount: string;
   status: string;
