@@ -124,6 +124,11 @@ export class AuthManager {
 
   private async deriveSecretKey(): Promise<CryptoKey> {
     if (!this.signer) throw new Error("Signer required for key derivation");
+
+    // NOTE: This is a simplified key derivation method, which should suffice for now
+    // as the temporary key has no financial implications.
+    // We will consider implementing a more secure version (e.g., requiring user input at runtime)
+    // if and when the need arises.
     const address = await this.signer.getAddress();
     const encoder = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey(
