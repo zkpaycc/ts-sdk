@@ -4,6 +4,10 @@ import { Signer } from "ethers";
 import { MockProxy, mock } from "jest-mock-extended";
 
 jest.mock("./apiClient");
+jest.mock("./token/token", () => ({
+  getTokenBySymbol: jest.fn(),
+  getTokenByAddress: jest.fn(),
+}));
 
 describe("AuthManager", () => {
   let mockApiClient: jest.Mocked<ApiClient>;

@@ -39,6 +39,20 @@ export const extractRequestTokenMetadata = async (
   return chain.nativeCurrency;
 };
 
+export const arrayBufferToHex = (buffer: ArrayBuffer): string => {
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+};
+
+export const hexToUint8Array = (hex: string): Uint8Array => {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+  }
+  return bytes;
+};
+
 const isChain = (value: unknown): value is Chain => {
   return (
     value != null &&
