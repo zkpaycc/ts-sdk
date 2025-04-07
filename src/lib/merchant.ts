@@ -55,6 +55,8 @@ export class Merchant {
       metadata: params.metadata,
     };
 
+    console.log(`[zkpay/sdk] Creating payment channel with payload:`, payload);
+
     const options: RequestOptions = {};
     const authToken = authManager.getAuthToken();
     if (authToken) {
