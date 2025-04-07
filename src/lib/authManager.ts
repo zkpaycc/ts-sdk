@@ -1,6 +1,7 @@
 import { ApiClient } from "./apiClient";
 import { Auth, AuthResponse } from "./types";
 import { Signer } from "ethers";
+import { arrayBufferToHex, hexToUint8Array } from "./utils";
 
 const STORAGE_KEY = "zkpay_auth";
 const isBrowser = () =>
@@ -28,9 +29,7 @@ export class AuthManager {
 
   async ensureAuthenticated(): Promise<void> {
     if (!this.signer) return;
-
     if (this.auth && this.auth.expiredAt > Date.now()) return;
-
     if (this.refreshingToken) return this.refreshingToken;
 
     this.refreshingToken = this.refreshAuthToken();
@@ -67,7 +66,10 @@ export class AuthManager {
       await this.persistAuth();
     } catch (error) {
       console.error(`[zkpay/sdk] Failed to refresh auth token:`, error);
-      throw new Error("Authentication failed");
+      if (error instanceof Error) {
+        throw new Error(`Authentication failed: ${error.message}`);
+      }
+      throw new Error("Authentication failed: Unknown error");
     }
   }
 
@@ -76,25 +78,26 @@ export class AuthManager {
 
     try {
       const encryptedData = localStorage.getItem(STORAGE_KEY);
-      if (encryptedData) {
-        const [ivHex, encryptedHex] = encryptedData.split(":");
-        const iv = Uint8Array.from(Buffer.from(ivHex, "hex"));
-        const encrypted = Uint8Array.from(Buffer.from(encryptedHex, "hex"));
-        const key = await this.deriveSecretKey();
-        const decrypted = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv },
-          key,
-          encrypted
-        );
-        const auth = JSON.parse(new TextDecoder().decode(decrypted)) as Auth;
-        if (auth.expiredAt > Date.now()) {
-          this.auth = auth;
-        }
+      if (!encryptedData) return;
 
-        // If the auth is not valid, remove it from localStorage
-        if (!this.auth || this.auth.expiredAt <= Date.now()) {
-          localStorage.removeItem(STORAGE_KEY);
-        }
+      const [ivHex, encryptedHex] = encryptedData.split(":");
+      if (!ivHex || !encryptedHex) {
+        throw new Error("Invalid persisted auth format");
+      }
+
+      const iv = hexToUint8Array(ivHex);
+      const encrypted = hexToUint8Array(encryptedHex);
+      const key = await this.deriveSecretKey();
+      const decrypted = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv },
+        key,
+        encrypted
+      );
+      const auth = JSON.parse(new TextDecoder().decode(decrypted)) as Auth;
+      if (auth.expiredAt > Date.now()) {
+        this.auth = auth;
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
       }
     } catch (error) {
       console.warn(`[zkpay/sdk] Failed to load persisted auth:`, error);
@@ -107,21 +110,28 @@ export class AuthManager {
 
     try {
       const key = await this.deriveSecretKey();
-      const iv = crypto.getRandomValues(new Uint8Array(12)); // 12-byte IV for AES-GCM
+      const iv = crypto.getRandomValues(new Uint8Array(12));
       const encoder = new TextEncoder();
       const encrypted = await crypto.subtle.encrypt(
         { name: "AES-GCM", iv },
         key,
         encoder.encode(JSON.stringify(this.auth))
       );
-      const ivHex = Buffer.from(iv).toString("hex");
-      const encryptedHex = Buffer.from(encrypted).toString("hex");
+      const ivHex = arrayBufferToHex(iv);
+      const encryptedHex = arrayBufferToHex(encrypted);
       localStorage.setItem(STORAGE_KEY, `${ivHex}:${encryptedHex}`);
     } catch (error) {
       console.warn(`[zkpay/sdk] Failed to persist auth:`, error);
+      if (
+        error instanceof DOMException &&
+        error.name === "QuotaExceededError"
+      ) {
+        console.error("[zkpay/sdk] LocalStorage quota exceeded");
+      }
     }
   }
 
+  /** Derives an encryption key from the signer's address using PBKDF2. */
   private async deriveSecretKey(): Promise<CryptoKey> {
     if (!this.signer) throw new Error("Signer required for key derivation");
 
@@ -131,6 +141,7 @@ export class AuthManager {
     // if and when the need arises.
     const address = await this.signer.getAddress();
     const encoder = new TextEncoder();
+    const salt = encoder.encode(`${address}-zkpay-salt`); // Unique per address
     const keyMaterial = await crypto.subtle.importKey(
       "raw",
       encoder.encode(address),
@@ -141,7 +152,7 @@ export class AuthManager {
     return crypto.subtle.deriveKey(
       {
         name: "PBKDF2",
-        salt: encoder.encode("zkpay-salt"),
+        salt,
         iterations: 100000,
         hash: "SHA-256",
       },
