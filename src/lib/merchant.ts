@@ -153,6 +153,7 @@ export class Merchant {
       BigInt(payment.amount),
       token.decimals
     );
+    payment.currency = token.symbol;
     return payment;
   }
 }
