@@ -1,7 +1,8 @@
 import { getChainConfig } from "@zkpay/core";
 import { Address, Chain, createPublicClient, erc20Abi, http } from "viem";
 
-const TOKEN_LIST_URL = "https://gateway.ipfs.io/ipns/tokens.uniswap.org";
+const TOKEN_LIST_URL =
+  "https://raw.githubusercontent.com/zkpaycc/token-list/refs/heads/main/list.json";
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours cache
 
 export type Token = {
@@ -24,6 +25,8 @@ type TokenList = {
 
 let cachedTokenList: TokenList | null = null;
 let lastFetchTime = 0;
+
+let cachedTokenMap: Record<string, Token> = {};
 
 export const getTokenList = async (): Promise<TokenList> => {
   const now = Date.now();
@@ -69,6 +72,10 @@ export const getTokenByAddress = async (
     return token;
   }
 
+  if (cachedTokenMap[address]) {
+    return cachedTokenMap[address];
+  }
+
   const config = getChainConfig(chain.id);
   const client = createPublicClient({
     chain,
@@ -88,12 +95,15 @@ export const getTokenByAddress = async (
     }),
   ]);
 
-  return {
+  const newToken: Token = {
     chainId: chain.id,
     address,
-    symbol: typeof symbol === "string" ? symbol : "UNKNOWN",
-    decimals: typeof decimals === "number" ? decimals : 18,
+    symbol: symbol,
+    decimals: decimals,
   };
+
+  cachedTokenMap[address] = newToken;
+  return newToken;
 };
 
 export const getTokenBySymbol = async (
