@@ -82,7 +82,16 @@ export const extractChannelTokenMetadata = async (channel: {
   if (!chain) return undefined;
 
   if (channel.tokenAddress) {
-    return await getTokenByAddress(chain, channel.tokenAddress);
+    try {
+      return await getTokenByAddress(chain, channel.tokenAddress);
+    } catch (error) {
+      console.error(
+        `[zkpay/sdk] Failed to fetch token details for address ${
+          channel.tokenAddress
+        }: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return undefined;
+    }
   }
 
   return chain.nativeCurrency;
