@@ -27,6 +27,7 @@ export interface GetChannelQuery {
   targetAddress?: Address;
   page?: number;
   limit?: number;
+  order?: "ASC" | "DESC";
 }
 
 export interface PaymentResponse {
@@ -43,14 +44,18 @@ export interface PaymentDetails {
   id: string;
   chainId: number;
   targetAddress: Address;
-  tokenAddress?: Address;
-  currency: string;
-  amount: string;
-  humanReadableAmount: string;
+  contractAddress?: Address;
   status: string;
-  redirectUrl: string;
+  amount: string;
+  humanReadableAmount?: string;
+  currency?: string;
+  tokenAddress?: Address;
+  webhookUrl?: string;
+  redirectUrl?: string;
+  referenceId?: string;
   transactions: Transaction[];
-  [key: string]: unknown;
+  createdAt: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface PaymentsResponse {
