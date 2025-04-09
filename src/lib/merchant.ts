@@ -40,6 +40,7 @@ export class Merchant {
 
   getDefaultPaymentParams(): Partial<MerchantConfigs> {
     return {
+      merchantAddress: this.config.merchantAddress,
       webhookUrl: this.config.webhookUrl,
       redirectUrl: this.config.redirectUrl,
     };
