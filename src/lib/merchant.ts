@@ -38,6 +38,13 @@ export class Merchant {
     });
   }
 
+  getDefaultPaymentParams(): Partial<MerchantConfigs> {
+    return {
+      webhookUrl: this.config.webhookUrl,
+      redirectUrl: this.config.redirectUrl,
+    };
+  }
+
   async createPayment(params: PaymentParams): Promise<PaymentResponse> {
     this.validatePaymentParams(params);
 
