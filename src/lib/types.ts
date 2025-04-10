@@ -40,6 +40,10 @@ export interface AuthResponse {
   expiresIn: number;
 }
 
+export interface BlockChainTransaction extends Transaction {
+  humanReadableAmount?: string;
+}
+
 export interface PaymentDetails {
   id: string;
   chainId: number;
@@ -53,7 +57,7 @@ export interface PaymentDetails {
   webhookUrl?: string;
   redirectUrl?: string;
   referenceId?: string;
-  transactions: Transaction[];
+  transactions: BlockChainTransaction[];
   createdAt: string;
   metadata: Record<string, unknown>;
 }
