@@ -164,6 +164,18 @@ export class Merchant {
       token.decimals
     );
     payment.currency = token.symbol;
+
+    for (const transaction of payment.transactions) {
+      if (transaction.token.address !== token.address) {
+        continue;
+      }
+
+      transaction.humanReadableAmount = formatUnits(
+        BigInt(transaction.amount),
+        token.decimals
+      );
+    }
+
     return payment;
   }
 }

@@ -37,6 +37,14 @@ describe("Merchant", () => {
     chainId: sepolia.id,
     status: "completed",
     amount: "1000000",
+    transactions: [
+      {
+        amount: "1000000",
+        token: {
+          address: undefined,
+        },
+      },
+    ],
   };
   const mockQueryPaymentsResponse = {
     items: [mockPaymentDetails],
@@ -203,6 +211,9 @@ describe("Merchant", () => {
         const result = await merchant.getPayment("pay_123");
         expect(result).toEqual(mockPaymentDetails);
         expect(result.humanReadableAmount).toEqual("0.000000000001");
+        expect(result.transactions[0].humanReadableAmount).toEqual(
+          "0.000000000001"
+        );
       });
     });
 
@@ -267,6 +278,9 @@ describe("Merchant", () => {
       const result = await merchant.queryPayments(query);
       expect(result).toEqual(mockQueryPaymentsResponse);
       expect(result.items[0].humanReadableAmount).toEqual("0.000000000001");
+      expect(result.items[0].transactions[0].humanReadableAmount).toEqual(
+        "0.000000000001"
+      );
     });
   });
 });
