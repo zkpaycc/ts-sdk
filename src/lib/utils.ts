@@ -72,22 +72,22 @@ export const chainMap = new Map<number, Chain>(
     .map(([, value]) => [value.id, value])
 );
 
-export const extractChannelTokenMetadata = async (channel: {
+export const extractTokenMetadata = async (param: {
   chainId: number;
   tokenAddress?: Address;
 }): Promise<
   { decimals: number; symbol: string; address?: string } | undefined
 > => {
-  const chain = chainMap.get(channel.chainId);
+  const chain = chainMap.get(param.chainId);
   if (!chain) return undefined;
 
-  if (channel.tokenAddress) {
+  if (param.tokenAddress) {
     try {
-      return await getTokenByAddress(chain, channel.tokenAddress);
+      return await getTokenByAddress(chain, param.tokenAddress);
     } catch (error) {
       console.error(
         `[zkpay/sdk] Failed to fetch token details for address ${
-          channel.tokenAddress
+          param.tokenAddress
         }: ${error instanceof Error ? error.message : String(error)}`
       );
       return undefined;

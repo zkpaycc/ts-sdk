@@ -3,7 +3,7 @@ import qs from "qs";
 import { ApiClient, RequestOptions } from "./apiClient";
 import { AuthManager } from "./authManager";
 import {
-  extractChannelTokenMetadata,
+  extractTokenMetadata,
   extractRequestTokenMetadata,
 } from "./utils";
 import {
@@ -156,7 +156,7 @@ export class Merchant {
   }
 
   private async normalize(payment: PaymentDetails): Promise<PaymentDetails> {
-    const token = await extractChannelTokenMetadata(payment);
+    const token = await extractTokenMetadata(payment);
     if (!token) return payment;
 
     payment.humanReadableAmount = formatUnits(

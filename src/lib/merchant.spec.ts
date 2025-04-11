@@ -12,7 +12,7 @@ jest.mock("./apiClient");
 jest.mock("./authManager");
 jest.mock("./utils", () => ({
   extractRequestTokenMetadata: jest.fn(),
-  extractChannelTokenMetadata: jest.fn(),
+  extractTokenMetadata: jest.fn(),
 }));
 
 describe("Merchant", () => {
@@ -84,7 +84,7 @@ describe("Merchant", () => {
         return { decimals: 18 };
       }
     );
-    require("./utils").extractChannelTokenMetadata.mockImplementation(
+    require("./utils").extractTokenMetadata.mockImplementation(
       (channel: { chainId: number; tokenAddress?: Address }) => {
         if (channel.tokenAddress) {
           return { decimals: 6, address: channel.tokenAddress };
