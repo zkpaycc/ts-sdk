@@ -26,7 +26,7 @@ type TokenList = {
 let cachedTokenList: TokenList | null = null;
 let lastFetchTime = 0;
 
-let cachedTokenMap: Record<string, Token> = {};
+let cachedTokenMap: Record<number, Record<string, Token>> = {};
 
 export const getTokenList = async (): Promise<TokenList> => {
   const now = Date.now();
@@ -72,8 +72,12 @@ export const getTokenByAddress = async (
     return token;
   }
 
-  if (cachedTokenMap[address]) {
-    return cachedTokenMap[address];
+  if (!cachedTokenMap[chain.id]) {
+    cachedTokenMap[chain.id] = {};
+  }
+
+  if (cachedTokenMap[chain.id][address]) {
+    return cachedTokenMap[chain.id][address];
   }
 
   const config = getChainConfig(chain.id);
@@ -102,7 +106,7 @@ export const getTokenByAddress = async (
     decimals: decimals,
   };
 
-  cachedTokenMap[address] = newToken;
+  cachedTokenMap[chain.id][address] = newToken;
   return newToken;
 };
 
